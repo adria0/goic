@@ -72,7 +72,6 @@ func NewContract(client *Web3Client, abi *abi.ABI, byteCode []byte, address *com
 		byteCode: byteCode,
 		address:  address,
 	}, nil
-
 }
 
 // NewContractFromJson initiates a contract ABI & bytecode from json file associated to a web3 client

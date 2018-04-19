@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -13,6 +12,9 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	log "github.com/sirupsen/logrus"
+
 )
 
 type EventHandlerFunc func(*types.Log) error
@@ -32,7 +34,6 @@ type EventDispatcher struct {
 	queue []*types.Log
 
 	filterch     chan types.Log
-	nextch       chan bool
 	installch    chan bool
 	terminatech  chan bool
 	terminatedch chan bool
@@ -48,7 +49,6 @@ func NewEventDispatcher(client *ethclient.Client) *EventDispatcher {
 		mutex:  &sync.Mutex{},
 		queue:  []*types.Log{},
 
-		nextch:       make(chan bool),
 		installch:    make(chan bool),
 		terminatech:  make(chan bool),
 		terminatedch: make(chan bool),
@@ -88,11 +88,7 @@ func (e *EventDispatcher) append(eventlog *types.Log) {
 	e.mutex.Unlock()
 }
 
-func (e *EventDispatcher) process() {
-
-	defer func() {
-		e.nextch <- true
-	}()
+func (e *EventDispatcher) process() bool {
 
 	e.mutex.Lock()
 	var logevent *types.Log
@@ -102,30 +98,31 @@ func (e *EventDispatcher) process() {
 	}
 	e.mutex.Unlock()
 
-	if logevent == nil {
-		time.Sleep(200)
-		return
+	if logevent == nil || logevent.Removed {
+		return false
 	}
 
-	if logevent.Removed {
-		return
-	}
-
-	var handler EventHandlerFunc
+	var handler *EventHandler
 
 	e.mutex.Lock()
 	for _, v := range e.eventHandlers {
 		if logevent.Address == v.Address && logevent.Topics[0].Hex() == v.Topic {
-			handler = v.Handler
+			handler = &v
 			break
 		}
 	}
 	e.mutex.Unlock()
 
-	if handler != nil {
-		handler(logevent)
+	if handler == nil {
+		return false
 	}
 
+	err := handler.Handler(logevent)
+	if err != nil {
+		log.Error("Failed handling ",handler.Topic," ",err)
+	}
+
+	return true
 }
 
 func (e *EventDispatcher) QueryStopAndWait() {
@@ -169,8 +166,7 @@ func (e *EventDispatcher) install() {
 
 	subscripton, err := e.client.SubscribeFilterLogs(ctx, query, filterch)
 	if err != nil {
-		// TODO log something
-		return
+		panic(err)
 	}
 
 	if e.filterch != nil {
@@ -193,24 +189,27 @@ func (e *EventDispatcher) Start() {
 			select {
 
 			case <-e.terminatech:
+				log.Debug("Dispatching terminatech")
 				break
 
 			case <-e.installch:
+				log.Debug("Dispatching installch")
 				e.install()
 
 			case logevent := <-e.filterch:
+				log.Debug("Dispatching filterch")
 				e.append(&logevent)
 
-			case <-e.nextch:
-				e.process()
-
+			default:
+				if !e.process() {
+					time.Sleep(time.Second)
+				}
 			}
 		}
 		e.terminatedch <- true
 	}()
 
 	e.installch <- true
-	e.nextch <- true
 }
 
 func debugLog(eventlog *types.Log) {

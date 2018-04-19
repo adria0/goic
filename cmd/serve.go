@@ -1,33 +1,26 @@
 package cmd
 
 import (
-	"log"
 	"math/big"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	eth "github.com/adriamb/goic/eth"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	log "github.com/sirupsen/logrus"
 )
 
-type Member struct {
-	address common.Address
-	ttl     uint64
-	files   map[string]uint64 // hash -> ttl
-}
-
 var (
-	members         map[common.Address]Member
 	eventDispatcher *eth.EventDispatcher
 )
 
 func handleHashAdded(eventlog *types.Log) error {
-	//	event HashAdded(address pubKey, string hashAdded, uint ttl);
 
 	type HashAdded struct {
-		PubKey common.Address
 		Hash   string
-		TTL    *big.Int
+		Ttl    *big.Int
 	}
 
 	var event HashAdded
@@ -36,16 +29,46 @@ func handleHashAdded(eventlog *types.Log) error {
 		return err
 	}
 
-	members[eventlog.Address].files[event.Hash] = event.TTL.Uint64()
+	log.WithFields(log.Fields{
+		"Hash": event.Hash,
+		"TTL": event.Ttl.String(),
+	  }).Debug("EVENT HashAdded");
 
+	// get the size & pin
+	stats, err := ipfs.ObjectStat(event.Hash)
+	if err != nil {
+		return err
+	}	
+	log.WithFields(log.Fields{
+		"Hash": event.Hash,
+		"DataSize": stats.DataSize,
+	  }).Debug("IPFS stats");
+
+	err = ipfs.Pin(event.Hash)
+	if err != nil {
+		return err
+	}
+
+	log.WithFields(log.Fields{
+		"Hash": event.Hash,
+	  }).Debug("IPFS pinning ok");
+
+	// store in the DB
+	err = storage.AddHash(
+		eventlog.Address.Hex(),event.Hash,
+		uint(event.Ttl.Int64()),uint(stats.DataSize),
+	)
+
+	if err != nil {
+		return err
+	}
+	
 	return nil
 }
 
 func handleHashRemoved(eventlog *types.Log) error {
-	//	event HashRemoved(address pubKey, string hashRemoved);
 
 	type HashRemoved struct {
-		PubKey common.Address
 		Hash   string
 	}
 
@@ -55,7 +78,21 @@ func handleHashRemoved(eventlog *types.Log) error {
 		return err
 	}
 
-	delete(members[eventlog.Address].files, event.Hash)
+	log.WithFields(log.Fields{
+		"Hash": event.Hash,
+	  }).Debug("EVENT HashRemoved");
+
+	// unpin
+	err = ipfs.Unpin(event.Hash)
+	if err != nil {
+		log.Println("IPFS says that hash ",event.Hash," is not pinned.")
+	}
+
+	// remove from DB
+	err = storage.RemoveHash(eventlog.Address.Hex(),event.Hash)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -65,13 +102,7 @@ func addContract(address common.Address, ttl uint64) {
 	abi := contract.Abi()
 
 	eventDispatcher.MustRegister(address, abi, "HashAdded", handleHashAdded)
-	eventDispatcher.MustRegister(address, abi, "HashAdded", handleHashRemoved)
-
-	members[address] = Member{
-		address: address,
-		ttl:     ttl,
-		files:   make(map[string]uint64),
-	}
+	eventDispatcher.MustRegister(address, abi, "HashRemoved", handleHashRemoved)
 
 }
 
@@ -80,7 +111,7 @@ func handleContractAdded(eventlog *types.Log) error {
 	type ContractAdded struct {
 		Member common.Address
 		PubKey common.Address
-		TTL    *big.Int
+		Ttl    *big.Int
 	}
 
 	var event ContractAdded
@@ -89,20 +120,18 @@ func handleContractAdded(eventlog *types.Log) error {
 		return err
 	}
 
-	addContract(event.PubKey, event.TTL.Uint64())
+	addContract(event.PubKey, event.Ttl.Uint64())
 
 	return nil
 }
 
-func mustServe() {
+func cmdServe(cmd *cobra.Command, args []string) {
 
-	mustLoad()
+	must(load())
 
 	log.Println("goic address is ", contract.Address().Hex())
 
 	// -- register handlers for main function
-
-	members = make(map[common.Address]Member)
 
 	eventDispatcher = eth.NewEventDispatcher(client.Client)
 
@@ -113,8 +142,10 @@ func mustServe() {
 	//eventDispatcher.MustRegister(address, abi, "PersistLimitChanged", handlePersistLimitChanged)
 
 	addContract(address, 0)
-
+	
 	eventDispatcher.Start()
+
+	cmdAddHash(nil,[]string{"QmS4ustL54uo8FzR9455qaxZwuMiUhyvMcX9Ba8nUH4uVv","1000"})
 
 	<-time.After(time.Second * 3600)
 }

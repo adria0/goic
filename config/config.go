@@ -14,6 +14,7 @@ var C Config
 // Config is the server configurtion
 type Config struct {
 	Keystore struct {
+		Account string
 		Path   string
 		Passwd string
 	}
@@ -22,6 +23,11 @@ type Config struct {
 		IPFSProxy struct {
 			JSONURL string
 			Address string
+			Deploy struct {
+				Members  []string
+				Required uint
+				PersistLimit uint
+			}
 		}
 	}
 
