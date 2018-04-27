@@ -6,11 +6,9 @@ import (
 
 	cfg "github.com/adriamb/goic/config"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	log "github.com/sirupsen/logrus"
-	// jww "github.com/spf13/jwalterweatherman"
-
 )
 
 var cfgFile string
@@ -29,28 +27,48 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the server",
 	Long:  "Start the server",
-	Run: cmdServe,
+	Run:   cmdServe,
 }
 
 var deployCmd = &cobra.Command{
 	Use:   "deploy",
 	Short: "Deploy the smartcontracts",
 	Long:  "Deploy the smartcontracts in two chains",
-	Run: cmdDeploy,
+	Run:   cmdDeploy,
 }
 
 var addHashCmd = &cobra.Command{
 	Use:   "addhash",
 	Short: "Add hash",
 	Long:  "addhash <ipfshash> <ttl>",
-	Run: cmdAddHash,
+	Run:   cmdAddHash,
 }
 
 var rmHashCmd = &cobra.Command{
 	Use:   "rmhash",
 	Short: "Remove a hash",
 	Long:  "rmhash <ipfshash>",
-	Run: cmdRemoveHash,
+	Run:   cmdRemoveHash,
+}
+
+var dumpDbCmd = &cobra.Command{
+	Use:   "dumpdb",
+	Short: "Dumps the database",
+	Long:  "Dumps the database",
+	Run:   cmdDumpDb,
+}
+var initDbCmd = &cobra.Command{
+	Use:   "initdb",
+	Short: "Dumps the database",
+	Long:  "Dumps the database",
+	Run:   cmdInitDb,
+}
+
+var skipTxCmd = &cobra.Command{
+	Use:   "skiptx",
+	Short: "Skip a transaction",
+	Long:  "Do not process the selected transaction",
+	Run:   cmdAddSkipTx,
 }
 
 // ExecuteCmd adds all child commands to the root command sets flags appropriately.
@@ -78,6 +96,9 @@ func init() {
 	RootCmd.AddCommand(deployCmd)
 	RootCmd.AddCommand(addHashCmd)
 	RootCmd.AddCommand(rmHashCmd)
+	RootCmd.AddCommand(dumpDbCmd)
+	RootCmd.AddCommand(initDbCmd)
+	RootCmd.AddCommand(skipTxCmd)
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -85,7 +106,7 @@ func initConfig() {
 
 	viper.SetConfigType("yaml")
 	viper.SetConfigName("goic")  // name ofconfig file (without extension)
-	viper.AddConfigPath(".") 	 // adding current directory as first search path
+	viper.AddConfigPath(".")     // adding current directory as first search path
 	viper.AddConfigPath("$HOME") // adding home directory as first search path
 	viper.SetEnvPrefix("GOIC")   // so viper.AutomaticEnv will get matching envvars starting with O2M_
 	viper.AutomaticEnv()         // read in environment variables that match
@@ -93,7 +114,6 @@ func initConfig() {
 	if cfgFile != "" { // enable ability to specify config file via flag
 		viper.SetConfigFile(cfgFile)
 	}
-
 
 	// If a config file is found, read it in.
 

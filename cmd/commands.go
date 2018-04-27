@@ -1,70 +1,101 @@
 package cmd
 
 import (
-	"math/big"
-	"fmt"
 	"encoding/json"
-	"github.com/spf13/cobra"
+	"fmt"
+	"math/big"
+	"os"
+
 	cfg "github.com/adriamb/goic/config"
+	sto "github.com/adriamb/goic/storage"
 	"github.com/ethereum/go-ethereum/common"
-	log "github.com/sirupsen/logrus"	
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 )
 
 func cmdAddHash(cmd *cobra.Command, args []string) {
 
-	if len(args)!=2 {
+	if len(args) != 2 {
 		must(fmt.Errorf("addhash <ipfshash> <ttl>"))
 	}
-	must(load())
+	must(load(false))
 
 	ttl := new(big.Int)
-	ttl.SetString(args[1],10)
-	tx, _, err := contract.SendTransactionSync(
+	ttl.SetString(args[1], 10)
+	_, _, err := contract.SendTransactionSync(
 		big.NewInt(0), 0,
-		"addHash",args[0],ttl,
+		"addHash", args[0], ttl,
 	)
 	must(err)
-	log.Info("tx ",tx.Hash().Hex())
 }
 
-func cmdRemoveHash(cmd *cobra.Command, args []string)  {
-	if len(args)!=1 {
+func cmdRemoveHash(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
 		must(fmt.Errorf("rmhash <ipfshash>"))
 	}
-	must(load())
-	tx, _, err := contract.SendTransactionSync(
+	must(load(false))
+	_, _, err := contract.SendTransactionSync(
 		big.NewInt(0), 0,
-		 "removeHash",args[0],
+		"removeHash", args[0],
 	)
 	must(err)
-	log.Info("tx ",tx.Hash().Hex())
 }
 
-func cmdDeploy(cmd *cobra.Command, args []string){
+func cmdAddSkipTx(cmd *cobra.Command, args []string) {
 
-	must(load())
+	if len(args) != 1 {
+		must(fmt.Errorf("skiptx <txhash>"))
+	}
+	must(load(true))
+	must(storage.AddSkipTx(common.HexToHash(args[0])))
+}
+
+func cmdDeploy(cmd *cobra.Command, args []string) {
+
+	must(load(true))
 
 	// -- deploy contract
 
-	members := make([]common.Address,len(cfg.C.Contracts.IPFSProxy.Deploy.Members))
-	for i,v := range cfg.C.Contracts.IPFSProxy.Deploy.Members {
+	members := make([]common.Address, len(cfg.C.Contracts.IPFSProxy.Deploy.Members))
+	for i, v := range cfg.C.Contracts.IPFSProxy.Deploy.Members {
 		members[i] = common.HexToAddress(v)
 	}
-	
+
 	_, _, err := contract.DeploySync(
 		members,
 		big.NewInt(int64(cfg.C.Contracts.IPFSProxy.Deploy.Required)),
 		big.NewInt(int64(cfg.C.Contracts.IPFSProxy.Deploy.PersistLimit)),
 	)
 	must(err)
-	log.Info("goic contract deployed at ", contract.Address().Hex())
+	log.WithField("address", contract.Address().Hex()).Info("Goic contract deployed")
+
+	err = storage.AddContract(*contract.Address())
+	must(err)
 
 }
 
-func cmdConfig(cmd *cobra.Command, args []string){
+func cmdConfig(cmd *cobra.Command, args []string) {
 
 	json, _ := json.MarshalIndent(cfg.C, "", "  ")
 	log.Println("Efective configuration: " + string(json))
 
+}
 
+func cmdDumpDb(cmd *cobra.Command, args []string) {
+
+	must(loadStorage())
+
+	storage.Dump(os.Stdout)
+}
+
+func cmdInitDb(cmd *cobra.Command, args []string) {
+
+	must(load(true))
+
+	storage.SetGlobals(sto.GlobalsEntry{
+		CurrentQuota: 0,
+		LastBlock:    0,
+		LastLogIndex: 0,
+		LastTxIndex:  0,
+	})
 }

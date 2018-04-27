@@ -4,12 +4,9 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"math/big"
 	"sync"
 	"time"
-
-	cfg "github.com/adriamb/goic/config"
 
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
@@ -18,6 +15,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	log "github.com/sirupsen/logrus"
 )
 
 var (
@@ -55,16 +54,15 @@ func NewWeb3Client(rpcURL string, ks *keystore.KeyStore, account accounts.Accoun
 }
 
 // AccountInfo retieves information about the default account
-func (w *Web3Client) AccountInfo() (string, error) {
+func (w *Web3Client) Balance() (string, error) {
 
-	address := w.Account.Address.Hex()
 	ctx := context.TODO()
 	balance, err := w.Client.BalanceAt(ctx, w.Account.Address, nil)
 	if err != nil {
 
 		return "", err
 	}
-	return address + "=" + balance.String() + " wei", nil
+	return balance.String(), nil
 }
 
 // SendTransactionSync executes a contract method and wait it finalizes
@@ -99,12 +97,10 @@ func (w *Web3Client) SendTransactionSync(to *common.Address, value *big.Int, gas
 	if gasLimit == 0 {
 		gasLimit, err = w.Client.EstimateGas(ctx, callmsg)
 		if err != nil {
-			if cfg.Verbose > 0 {
-				log.Printf("Failed EstimateGas from=%v to=%v value=%v data=%v",
-					callmsg.From.Hex(), callmsg.To.Hex(),
-					callmsg.Value, hex.EncodeToString(callmsg.Data),
-				)
-			}
+			log.Error("WEB3 Failed EstimateGas from=%v to=%v value=%v data=%v",
+				callmsg.From.Hex(), callmsg.To.Hex(),
+				callmsg.Value, hex.EncodeToString(callmsg.Data),
+			)
 			return nil, nil, err
 		}
 	}
@@ -137,10 +133,7 @@ func (w *Web3Client) SendTransactionSync(to *common.Address, value *big.Int, gas
 		return nil, nil, err
 	}
 
-	if cfg.Verbose > 0 {
-		log.Printf("%#v", tx)
-	}
-
+	log.WithField("tx", tx.Hash().Hex()).Info("WEB3 Sending transaction")
 	if err = w.Client.SendTransaction(ctx, tx); err != nil {
 		return nil, nil, err
 	}
@@ -154,14 +147,15 @@ func (w *Web3Client) SendTransactionSync(to *common.Address, value *big.Int, gas
 	}
 
 	if receipt != nil && receipt.Status == types.ReceiptStatusFailed {
-		log.Printf("FAILED RECEIPT TX %#v", receipt)
+		log.WithField("tx", tx.Hash().Hex()).Error("WEB3 Failed transaction receipt")
 		return tx, receipt, ErrReceiptStatusFailed
 	}
 
 	if receipt == nil {
-		log.Println("FAILED TX #v", tx)
+		log.WithField("tx", tx.Hash().Hex()).Error("WEB3 Failed transaction")
 		return tx, receipt, ErrReceiptNotRecieved
 	}
+	log.WithField("tx", tx.Hash().Hex()).Debug("WEB3 Success transaction")
 
 	return tx, receipt, err
 }

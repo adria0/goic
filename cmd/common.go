@@ -1,21 +1,21 @@
 package cmd
 
 import (
-	"os"
-	"net/http"
-	"io"
-	"sync"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"sync"
 
 	cfg "github.com/adriamb/goic/config"
 	eth "github.com/adriamb/goic/eth"
-	storagedb "github.com/adriamb/goic/storage"
+	sto "github.com/adriamb/goic/storage"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
-	
+
 	shell "github.com/ipfs/go-ipfs-api"
 )
 
@@ -23,7 +23,7 @@ var (
 	client   *eth.Web3Client
 	contract *eth.Contract
 	ipfs     *shell.Shell
-	storage  *storagedb.Storage
+	storage  *sto.Storage
 )
 
 func must(err error) {
@@ -32,8 +32,8 @@ func must(err error) {
 	}
 }
 
-func load() error {
-	
+func load(withStorage bool) error {
+
 	if client != nil {
 		// already initialized
 		return nil
@@ -41,17 +41,19 @@ func load() error {
 
 	var err error
 
-	if err = loadEthClient() ; err != nil {
+	if err = loadEthClient(); err != nil {
 		return err
 	}
-	if err = loadIPFSClient() ; err != nil {
+	if err = loadIPFSClient(); err != nil {
 		return err
 	}
-	if err = loadContract() ; err != nil {
+	if err = loadContract(); err != nil {
 		return err
 	}
-	if err = loadStorage() ; err != nil {
-		return err
+	if withStorage {
+		if err = loadStorage(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -85,7 +87,7 @@ func loadStorage() error {
 
 	var err error
 
-	storage,err = storagedb.New()
+	storage, err = sto.New()
 
 	return err
 
@@ -119,12 +121,15 @@ func loadEthClient() error {
 
 	client.ClientMutex = &sync.Mutex{}
 
-	accountInfo, err := client.AccountInfo()
+	balance, err := client.Balance()
 	if err != nil {
 		return err
 	}
 
-	log.Println("Account info: ", accountInfo)
+	log.WithFields(log.Fields{
+		"account": account.Address.Hex(),
+		"balance": balance,
+	}).Info("Account loaded from keystore")
 	return nil
 }
 
@@ -132,7 +137,6 @@ func loadContract() error {
 
 	var err error
 
-	log.Println("Downloading ", cfg.C.Contracts.IPFSProxy.JSONURL)
 	resp, err := http.Get(cfg.C.Contracts.IPFSProxy.JSONURL)
 	if err != nil {
 		return err
@@ -151,11 +155,9 @@ func loadContract() error {
 }
 
 func loadIPFSClient() error {
-	ipfs = shell.NewLocalShell()
+	ipfs = shell.NewShell(cfg.C.IPFS.APIURL)
 	if !ipfs.IsUp() {
 		return fmt.Errorf("Cannot connect with local IPFS node")
 	}
 	return nil
 }
-
-

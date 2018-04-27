@@ -15,20 +15,23 @@ var C Config
 type Config struct {
 	Keystore struct {
 		Account string
-		Path   string
-		Passwd string
+		Path    string
+		Passwd  string
 	}
 
 	Contracts struct {
 		IPFSProxy struct {
 			JSONURL string
 			Address string
-			Deploy struct {
-				Members  []string
-				Required uint
+			Deploy  struct {
+				Members      []string
+				Required     uint
 				PersistLimit uint
 			}
 		}
+	}
+	IPFS struct {
+		APIURL string
 	}
 
 	Web3 struct {

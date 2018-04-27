@@ -6,12 +6,15 @@ keystore:
 contracts:
     IPFSProxy:
         JSONURL: https://raw.githubusercontent.com/ipfsconsortium/IPFSConsortiumContracts/1b78f4e167aeeb71523b3bb80580c9b95107b696/build/contracts/IPFSProxy.json
-        Address: 0x4b532105466E221fe63DC6B38BD99Bd2b11e01a6
+        Address: 0x4f98D52F66Bf76C743ff4A3Dcd5e8524621085c5
         Deploy:
             Members:
                 - 0xda4224ea7910d9c56d2f947d63088a556437da41
             Required: 1
             PersistLimit: 1
-            
-Web3:
+
+ipfs:
+    APIURL: http://localhost:5001
+
+web3:
     RPCURL: ws://localhost:8546

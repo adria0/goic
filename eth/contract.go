@@ -13,9 +13,9 @@ import (
 
 	cfg "github.com/adriamb/goic/config"
 
-	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
+	abi "github.com/ethereum/go-ethereum/accounts/abi"
+	common "github.com/ethereum/go-ethereum/common"
+	types "github.com/ethereum/go-ethereum/core/types"
 )
 
 // Contract is a smartcontract with optional address
@@ -60,7 +60,6 @@ func UnmarshallAbiJson(jsonReader io.Reader) (*abi.ABI, []byte, error) {
 	}
 
 	return &abiObject, byteCode, nil
-
 }
 
 // NewContract initiates a contract ABI & bytecode from json file associated to a web3 client
