@@ -1,10 +1,8 @@
-package cmd
+package commands
 
 import (
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"sync"
 
 	cfg "github.com/adriamb/goic/config"
@@ -25,12 +23,6 @@ var (
 	ipfs     *shell.Shell
 	storage  *sto.Storage
 )
-
-func must(err error) {
-	if err != nil {
-		log.Panicln(err)
-	}
-}
 
 func load(withStorage bool) error {
 
@@ -58,36 +50,11 @@ func load(withStorage bool) error {
 	return nil
 }
 
-func httpGetFile(filepath string, url string) error {
-
-	// Create the file
-	out, err := os.Create(filepath)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	// Get the data
-	resp, err := http.Get(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	// Write the body to file
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func loadStorage() error {
 
 	var err error
 
-	storage, err = sto.New()
+	storage, err = sto.New(cfg.C.DB.Path)
 
 	return err
 
@@ -121,7 +88,7 @@ func loadEthClient() error {
 
 	client.ClientMutex = &sync.Mutex{}
 
-	balance, err := client.Balance()
+	balance, err := client.BalanceInfo()
 	if err != nil {
 		return err
 	}

@@ -1,4 +1,4 @@
-package eth
+package service
 
 import (
 	"context"
@@ -17,6 +17,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type EventHandlerFunc func(*types.Log) error
+
 type scanEventHandler struct {
 	Address        common.Address
 	EventSignature string
@@ -25,34 +27,34 @@ type scanEventHandler struct {
 }
 
 type ScanEventDispatcher struct {
-	client        *ethclient.Client
+	sync.Mutex
+	client *ethclient.Client
+
 	eventHandlers []scanEventHandler
 
-	mutex *sync.Mutex
+	savepoint *SavePoint
 
-	savepoint SavePoint
+	block    *types.Block
+	receipts *ReceiptDownloader
 
-	block *types.Block
-
-	receipts map[common.Hash]*types.Receipt
+	terminatech  chan interface{}
+	terminatedch chan interface{}
 
 	nextBlock    uint64
 	nextTxIndex  uint
 	nextLogIndex uint
-
-	terminatech  chan bool
-	terminatedch chan bool
 }
 
-func NewScanEventDispatcher(client *ethclient.Client, savepoint SavePoint) *ScanEventDispatcher {
+func NewScanEventDispatcher(client *ethclient.Client, savepoint *SavePoint) *ScanEventDispatcher {
 
 	return &ScanEventDispatcher{
 		client:    client,
 		savepoint: savepoint,
-		mutex:     &sync.Mutex{},
 
-		terminatech:  make(chan bool),
-		terminatedch: make(chan bool),
+		receipts: NewReceiptDownloader(client, 10),
+
+		terminatech:  make(chan interface{}),
+		terminatedch: make(chan interface{}),
 	}
 }
 
@@ -73,27 +75,44 @@ func (e *ScanEventDispatcher) RegisterHandler(address common.Address, abi *abi.A
 		Handler:        handler,
 	}
 
-	e.mutex.Lock()
+	e.Lock()
 	e.eventHandlers = append(e.eventHandlers, eventHandler)
-	e.mutex.Unlock()
+	e.Unlock()
 }
 
-// NotifyUpdate updates the registers
-func (e *ScanEventDispatcher) NotifyHandlersChanged() {
+func (e *ScanEventDispatcher) runHandlerFor(logevent *types.Log) error {
 
+	if !logevent.Removed {
+
+		var handler *scanEventHandler
+		e.Lock()
+		for _, v := range e.eventHandlers {
+			if logevent.Address == v.Address && logevent.Topics[0].Hex() == v.Topic {
+				handler = &v
+				break
+			}
+		}
+		e.Unlock()
+
+		if handler != nil {
+			log.WithField("event", handler.EventSignature).Debug("EVENT run handler ")
+			return handler.Handler(logevent)
+		}
+	}
+
+	return nil
 }
 
 func (e *ScanEventDispatcher) process() (bool, error) {
 
 	var err error
 
+	// Retrieve the last processed log, this is only called in the first loop
 	if e.nextBlock == 0 {
-		/* retrieve the last processed transaction */
 		e.nextBlock, e.nextTxIndex, e.nextLogIndex, err = e.savepoint.Load()
 		if err != nil {
 			return false, err
 		}
-
 		e.nextLogIndex++
 	}
 
@@ -103,69 +122,55 @@ func (e *ScanEventDispatcher) process() (bool, error) {
 		"logindex": e.nextLogIndex,
 	}).Debug("EVENT scanning blockchain")
 
-	// check if e.block is valid, if not download it
+	// Check if e.block is valid, if not download it
 	if e.block == nil || e.block.NumberU64() < e.nextBlock {
-
 		e.block, err = e.client.BlockByNumber(context.TODO(), big.NewInt(int64(e.nextBlock)))
 		if err == ethereum.NotFound {
+			// still not available
 			return true, nil
 		}
 		if err != nil {
 			return false, err
 		}
-		e.receipts = make(map[common.Hash]*types.Receipt)
+		for index := e.nextTxIndex; index < uint(len(e.block.Transactions())); index++ {
+			log.Debug("Enqueueing ", e.block.Transactions()[index].Hash().Hex())
+			e.receipts.Request(index, e.block.Transactions()[index].Hash())
+		}
 	}
 
+	// Download the receipt that contains the log
 	var receipt *types.Receipt
-
+	log.Debug("e.nextTxIndex=", e.nextTxIndex, " len(e.block.Transactions())=", len(e.block.Transactions()))
 	if e.nextTxIndex < uint(len(e.block.Transactions())) {
 
 		txid := e.block.Transactions()[e.nextTxIndex].Hash()
+		log.Debug("Reading receipt ", txid.Hex())
+		receipt, err := e.receipts.Get(txid)
+		if err != nil {
+			return false, err
+		}
+		log.Debug("Readed receipt ", txid.Hex())
+
+		// Is marked the transaction to be skipped?
 		skip, err := e.savepoint.SkipTx(txid)
 		if err != nil {
 			return false, err
 		}
 
-		if !skip {
-			var exists bool
-			receipt, exists = e.receipts[txid]
-			if !exists {
-				receipt, err = e.client.TransactionReceipt(context.TODO(), txid)
-				if err != nil {
-					return false, err
-				}
-				e.receipts[txid] = receipt
-			}
+		if skip {
+			e.receipts.Forget(receipt.TxHash)
 		}
 	}
 
 	if receipt != nil && e.nextLogIndex < uint(len(receipt.Logs)) {
-
 		logevent := receipt.Logs[e.nextLogIndex]
-
-		if !logevent.Removed {
-
-			var handler *scanEventHandler
-			e.mutex.Lock()
-			for _, v := range e.eventHandlers {
-				if logevent.Address == v.Address && logevent.Topics[0].Hex() == v.Topic {
-					handler = &v
-					break
-				}
-			}
-			e.mutex.Unlock()
-
-			if handler != nil {
-				log.WithField("event", handler.EventSignature).Debug("EVENT run handler ")
-				err := handler.Handler(logevent)
-				if err != nil {
-					log.WithFields(log.Fields{
-						"err":  err,
-						"txid": receipt.TxHash.Hex(),
-					}).Warn("EVENT Failed handling ")
-					return false, err
-				}
-			}
+		err = e.runHandlerFor(logevent)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err":  err,
+				"txid": receipt.TxHash.Hex(),
+			}).Warn("EVENT Failed handling ")
+			return false, err
 		}
 
 		e.savepoint.Save(logevent)
@@ -175,6 +180,9 @@ func (e *ScanEventDispatcher) process() (bool, error) {
 	/* go to next */
 
 	if receipt == nil || e.nextLogIndex >= uint(len(receipt.Logs)) {
+		if receipt != nil {
+			e.receipts.Forget(receipt.TxHash)
+		}
 		e.nextLogIndex = 0
 		e.nextTxIndex++
 	}
@@ -190,7 +198,7 @@ func (e *ScanEventDispatcher) process() (bool, error) {
 
 func (e *ScanEventDispatcher) QueryStop() {
 	go func() {
-		e.terminatech <- true
+		e.terminatech <- nil
 	}()
 }
 
@@ -201,12 +209,15 @@ func (e *ScanEventDispatcher) WaitStopped() {
 func (e *ScanEventDispatcher) Start() {
 
 	go func() {
+		e.receipts.Start()
 		for true {
 			select {
 
 			case <-e.terminatech:
 				log.Debug("EVENT Dispatching terminatech")
-				e.terminatedch <- true
+				e.terminatedch <- nil
+				e.receipts.QueryStop()
+				e.receipts.WaitStopped()
 				return
 
 			default:
@@ -214,7 +225,7 @@ func (e *ScanEventDispatcher) Start() {
 				if err != nil {
 					go func() {
 						log.Error("EVENT Failed ", err)
-						e.terminatech <- true
+						e.terminatech <- nil
 					}()
 				} else if wait {
 					time.Sleep(4 * time.Second)

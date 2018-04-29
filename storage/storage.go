@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -21,9 +22,9 @@ const (
 )
 
 var (
-	errContractAlreadyExists = fmt.Errorf("Contract already exists in db")
-	errContractNotExists     = fmt.Errorf("Contract does not exists in db")
-	errInconsistentSize      = fmt.Errorf("Inconsistent db and IPFS datasize")
+	errContractAlreadyExists = errors.New("contract already exists in db")
+	errContractNotExists     = errors.New("contract does not exists in db")
+	errInconsistentSize      = errors.New("inconsistent db and IPFS datasize")
 )
 
 type Storage struct {
@@ -53,8 +54,8 @@ type GlobalsEntry struct {
 	LastLogIndex uint
 }
 
-func New() (*Storage, error) {
-	db, err := leveldb.OpenFile("./db", nil)
+func New(path string) (*Storage, error) {
+	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
 		return nil, err
 	}

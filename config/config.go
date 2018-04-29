@@ -6,8 +6,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-var Verbose int
-
 // C is the package config
 var C Config
 
@@ -29,6 +27,10 @@ type Config struct {
 				PersistLimit uint
 			}
 		}
+	}
+
+	DB struct {
+		Path string
 	}
 	IPFS struct {
 		APIURL string

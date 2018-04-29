@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	cmd "github.com/adriamb/goic/commands"
 	cfg "github.com/adriamb/goic/config"
 
 	log "github.com/sirupsen/logrus"
@@ -11,9 +12,14 @@ import (
 	"github.com/spf13/viper"
 )
 
-var cfgFile string
+var (
+	// cfgFile is the configuration file path.
+	cfgFile string
+	// verbose is the verbosity level used in logrus.
+	verbose string
+)
 
-// RootCmd represents the base command when called without any subcommands
+// RootCmd represents the base command when called without any subcommands.
 var RootCmd = &cobra.Command{
 	Use:   "goic",
 	Short: "IPFS consortium client",
@@ -27,55 +33,60 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the server",
 	Long:  "Start the server",
-	Run:   cmdServe,
+	Run:   cmd.Serve,
 }
 
 var deployCmd = &cobra.Command{
 	Use:   "deploy",
 	Short: "Deploy the smartcontracts",
 	Long:  "Deploy the smartcontracts in two chains",
-	Run:   cmdDeploy,
+	Run:   cmd.Deploy,
 }
 
 var addHashCmd = &cobra.Command{
 	Use:   "addhash",
 	Short: "Add hash",
 	Long:  "addhash <ipfshash> <ttl>",
-	Run:   cmdAddHash,
+	Run:   cmd.AddHash,
 }
 
 var rmHashCmd = &cobra.Command{
 	Use:   "rmhash",
 	Short: "Remove a hash",
 	Long:  "rmhash <ipfshash>",
-	Run:   cmdRemoveHash,
+	Run:   cmd.RemoveHash,
 }
 
 var dumpDbCmd = &cobra.Command{
 	Use:   "dumpdb",
 	Short: "Dumps the database",
 	Long:  "Dumps the database",
-	Run:   cmdDumpDb,
+	Run:   cmd.DumpDb,
 }
 var initDbCmd = &cobra.Command{
 	Use:   "initdb",
 	Short: "Dumps the database",
 	Long:  "Dumps the database",
-	Run:   cmdInitDb,
+	Run:   cmd.InitDb,
 }
 
 var skipTxCmd = &cobra.Command{
 	Use:   "skiptx",
 	Short: "Skip a transaction",
 	Long:  "Do not process the selected transaction",
-	Run:   cmdAddSkipTx,
+	Run:   cmd.AddSkipTx,
+}
+
+var testCmd = &cobra.Command{
+	Use:   "test",
+	Short: "test",
+	Long:  "test",
+	Run:   cmd.Test,
 }
 
 // ExecuteCmd adds all child commands to the root command sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func ExecuteCmd() {
-
-	log.SetLevel(log.DebugLevel)
 
 	if err := RootCmd.Execute(); err != nil {
 		fmt.Println(err)
@@ -84,14 +95,13 @@ func ExecuteCmd() {
 	}
 }
 
+// init is called when the package loads and initializes cobra.
 func init() {
 
-	//jww.SetLogThreshold(jww.LevelTrace)
-	//jww.SetStdoutThreshold(jww.LevelTrace)
-
 	cobra.OnInitialize(initConfig)
-	RootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/goic.yaml)")
-	RootCmd.PersistentFlags().IntVar(&cfg.Verbose, "verbose", 0, "verboose level")
+	RootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file")
+	RootCmd.PersistentFlags().StringVar(&verbose, "verbose", "INFO", "verbose level")
+
 	RootCmd.AddCommand(serveCmd)
 	RootCmd.AddCommand(deployCmd)
 	RootCmd.AddCommand(addHashCmd)
@@ -99,10 +109,18 @@ func init() {
 	RootCmd.AddCommand(dumpDbCmd)
 	RootCmd.AddCommand(initDbCmd)
 	RootCmd.AddCommand(skipTxCmd)
+	RootCmd.AddCommand(testCmd)
+
 }
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
+
+	if logLevel, err := log.ParseLevel(verbose); err == nil {
+		log.SetLevel(logLevel)
+	} else {
+		panic(err)
+	}
 
 	viper.SetConfigType("yaml")
 	viper.SetConfigName("goic")  // name ofconfig file (without extension)
@@ -115,15 +133,14 @@ func initConfig() {
 		viper.SetConfigFile(cfgFile)
 	}
 
-	// If a config file is found, read it in.
+	if err := viper.ReadInConfig(); err != nil {
+		panic(err)
+	}
 
-	if err := viper.ReadInConfig(); err == nil {
-		log.Println("Using config file:", viper.ConfigFileUsed())
-		if err := viper.Unmarshal(&cfg.C); err != nil {
-			panic(err)
-		}
-	} else {
-		log.Fatalln(err)
+	log.WithField("file", viper.ConfigFileUsed()).Debug("Using config file")
+
+	if err := viper.Unmarshal(&cfg.C); err != nil {
+		panic(err)
 	}
 
 }

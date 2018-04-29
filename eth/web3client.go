@@ -3,7 +3,7 @@ package eth
 import (
 	"context"
 	"encoding/hex"
-	"fmt"
+	"errors"
 	"math/big"
 	"sync"
 	"time"
@@ -21,9 +21,9 @@ import (
 
 var (
 	// ErrReceiptStatusFailed when recieving a failed transaction
-	ErrReceiptStatusFailed = fmt.Errorf("ReceiptStatusFailed")
+	errReceiptStatusFailed = errors.New("receipt status is failed")
 	// ErrReceiptNotRecieved when unable to retrieve a transaction
-	ErrReceiptNotRecieved = fmt.Errorf("ErrReceiptNotRecieved")
+	errReceiptNotRecieved = errors.New("receipt not available")
 )
 
 // Web3Client defines a connection to a client via websockets
@@ -53,8 +53,8 @@ func NewWeb3Client(rpcURL string, ks *keystore.KeyStore, account accounts.Accoun
 	}, nil
 }
 
-// AccountInfo retieves information about the default account
-func (w *Web3Client) Balance() (string, error) {
+// BalanceInfo retieves information about the default account
+func (w *Web3Client) BalanceInfo() (string, error) {
 
 	ctx := context.TODO()
 	balance, err := w.Client.BalanceAt(ctx, w.Account.Address, nil)
@@ -148,12 +148,12 @@ func (w *Web3Client) SendTransactionSync(to *common.Address, value *big.Int, gas
 
 	if receipt != nil && receipt.Status == types.ReceiptStatusFailed {
 		log.WithField("tx", tx.Hash().Hex()).Error("WEB3 Failed transaction receipt")
-		return tx, receipt, ErrReceiptStatusFailed
+		return tx, receipt, errReceiptStatusFailed
 	}
 
 	if receipt == nil {
 		log.WithField("tx", tx.Hash().Hex()).Error("WEB3 Failed transaction")
-		return tx, receipt, ErrReceiptNotRecieved
+		return tx, receipt, errReceiptNotRecieved
 	}
 	log.WithField("tx", tx.Hash().Hex()).Debug("WEB3 Success transaction")
 

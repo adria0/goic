@@ -5,17 +5,15 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"io/ioutil"
-	"log"
 	"math/big"
-
-	cfg "github.com/adriamb/goic/config"
 
 	abi "github.com/ethereum/go-ethereum/accounts/abi"
 	common "github.com/ethereum/go-ethereum/common"
 	types "github.com/ethereum/go-ethereum/core/types"
+	log "github.com/sirupsen/logrus"
 )
 
 // Contract is a smartcontract with optional address
@@ -27,7 +25,7 @@ type Contract struct {
 }
 
 var (
-	errAddressHasNoCode = fmt.Errorf("Account has no code")
+	errAddressHasNoCode = errors.New("address has no code")
 )
 
 func UnmarshallAbiJson(jsonReader io.Reader) (*abi.ABI, []byte, error) {
@@ -42,8 +40,8 @@ func UnmarshallAbiJson(jsonReader io.Reader) (*abi.ABI, []byte, error) {
 		return nil, nil, err
 	}
 
-	abivalue := fields["abi"]
-	bytecodehex := fields["bytecode"].(string)
+	abivalue, bytecodehex := fields["abi"], fields["bytecode"].(string)
+
 	byteCode, err := hex.DecodeString(bytecodehex[2:])
 	if err != nil {
 		return nil, nil, err
@@ -91,8 +89,13 @@ func (c *Contract) VerifyBytecode() error {
 	if err != nil {
 		return err
 	}
+
+	log.WithFields(log.Fields{
+		"address":  c.address.Hex(),
+		"codesize": len(code),
+	}).Debug("CONTRACT get code size")
+
 	if code == nil || len(code) == 0 {
-		log.Println("Account ", c.address.Hex(), " has no code")
 		return errAddressHasNoCode
 	}
 	return nil
@@ -103,10 +106,8 @@ func (c *Contract) SendTransactionSync(value *big.Int, gasLimit uint64, funcname
 
 	msg, err := c.abi.Pack(funcname, params...)
 	if err != nil {
-		if cfg.Verbose > 0 {
-			log.Println("Failed packing ", funcname)
-			return nil, nil, err
-		}
+		log.Println("Failed packing ", funcname)
+		return nil, nil, err
 	}
 	tx, receipt, err := c.client.SendTransactionSync(c.address, value, gasLimit, msg)
 	if err != nil {

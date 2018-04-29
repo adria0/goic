@@ -92,7 +92,6 @@ func (e *SubscriptionEventDispatcher) append(eventlog *types.Log) {
 func (e *SubscriptionEventDispatcher) process() bool {
 
 	// pop next from the queue
-
 	e.mutex.Lock()
 	var logevent *types.Log
 	if len(e.queue) > 0 {

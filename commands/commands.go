@@ -1,19 +1,23 @@
-package cmd
+package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
 	"os"
 
 	cfg "github.com/adriamb/goic/config"
+	"github.com/adriamb/goic/service"
 	sto "github.com/adriamb/goic/storage"
+
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
-func cmdAddHash(cmd *cobra.Command, args []string) {
+func AddHash(cmd *cobra.Command, args []string) {
 
 	if len(args) != 2 {
 		must(fmt.Errorf("addhash <ipfshash> <ttl>"))
@@ -29,7 +33,7 @@ func cmdAddHash(cmd *cobra.Command, args []string) {
 	must(err)
 }
 
-func cmdRemoveHash(cmd *cobra.Command, args []string) {
+func RemoveHash(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		must(fmt.Errorf("rmhash <ipfshash>"))
 	}
@@ -41,7 +45,7 @@ func cmdRemoveHash(cmd *cobra.Command, args []string) {
 	must(err)
 }
 
-func cmdAddSkipTx(cmd *cobra.Command, args []string) {
+func AddSkipTx(cmd *cobra.Command, args []string) {
 
 	if len(args) != 1 {
 		must(fmt.Errorf("skiptx <txhash>"))
@@ -50,7 +54,7 @@ func cmdAddSkipTx(cmd *cobra.Command, args []string) {
 	must(storage.AddSkipTx(common.HexToHash(args[0])))
 }
 
-func cmdDeploy(cmd *cobra.Command, args []string) {
+func Deploy(cmd *cobra.Command, args []string) {
 
 	must(load(true))
 
@@ -74,21 +78,21 @@ func cmdDeploy(cmd *cobra.Command, args []string) {
 
 }
 
-func cmdConfig(cmd *cobra.Command, args []string) {
+func Config(cmd *cobra.Command, args []string) {
 
 	json, _ := json.MarshalIndent(cfg.C, "", "  ")
 	log.Println("Efective configuration: " + string(json))
 
 }
 
-func cmdDumpDb(cmd *cobra.Command, args []string) {
+func DumpDb(cmd *cobra.Command, args []string) {
 
 	must(loadStorage())
 
 	storage.Dump(os.Stdout)
 }
 
-func cmdInitDb(cmd *cobra.Command, args []string) {
+func InitDb(cmd *cobra.Command, args []string) {
 
 	must(load(true))
 
@@ -98,4 +102,41 @@ func cmdInitDb(cmd *cobra.Command, args []string) {
 		LastLogIndex: 0,
 		LastTxIndex:  0,
 	})
+}
+
+func Test(cmd *cobra.Command, args []string) {
+	client, err := ethclient.Dial("http://localhost:8545")
+	must(err)
+	download := service.NewReceiptDownloader(client, 10)
+	download.Start()
+
+	block := 5527294
+	for blockno := block - 2; blockno < block; blockno++ {
+		block, err := client.BlockByNumber(context.TODO(), big.NewInt(int64(blockno)))
+		must(err)
+		for index, tx := range block.Transactions() {
+			download.Request(uint(index), tx.Hash())
+		}
+		for _, tx := range block.Transactions() {
+			receipt, err := download.Get(tx.Hash())
+			download.Forget(tx.Hash())
+			must(err)
+			log.Info("count====>", len(receipt.Logs))
+		}
+	}
+	download.QueryStop()
+	download.WaitStopped()
+
+}
+
+func Serve(cmd *cobra.Command, args []string) {
+
+	must(load(true))
+
+	service := service.NewService(
+		client, contract, ipfs, storage,
+	)
+
+	service.Serve()
+
 }

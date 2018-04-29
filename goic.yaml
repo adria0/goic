@@ -18,3 +18,6 @@ ipfs:
 
 web3:
     RPCURL: ws://localhost:8546
+
+db:
+    path: /tmp/goicdb
