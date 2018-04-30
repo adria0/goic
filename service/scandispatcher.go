@@ -134,7 +134,7 @@ func (e *ScanEventDispatcher) process() (bool, error) {
 		}
 		for index := e.nextTxIndex; index < uint(len(e.block.Transactions())); index++ {
 			log.Debug("Enqueueing ", e.block.Transactions()[index].Hash().Hex())
-			e.receipts.Request(index, e.block.Transactions()[index].Hash())
+			e.receipts.Request(e.block.Transactions()[index].Hash())
 		}
 	}
 
@@ -145,10 +145,12 @@ func (e *ScanEventDispatcher) process() (bool, error) {
 
 		txid := e.block.Transactions()[e.nextTxIndex].Hash()
 		log.Debug("Reading receipt ", txid.Hex())
+
 		receipt, err := e.receipts.Get(txid)
 		if err != nil {
 			return false, err
 		}
+
 		log.Debug("Readed receipt ", txid.Hex())
 
 		// Is marked the transaction to be skipped?

@@ -105,24 +105,33 @@ func InitDb(cmd *cobra.Command, args []string) {
 }
 
 func Test(cmd *cobra.Command, args []string) {
+
 	client, err := ethclient.Dial("http://localhost:8545")
 	must(err)
-	download := service.NewReceiptDownloader(client, 10)
+	download := service.NewReceiptDownloader(client, 20)
 	download.Start()
 
-	block := 5527294
-	for blockno := block - 2; blockno < block; blockno++ {
+	startblock := 4000000
+	for blockno := startblock; blockno < startblock+5000; blockno++ {
 		block, err := client.BlockByNumber(context.TODO(), big.NewInt(int64(blockno)))
 		must(err)
-		for index, tx := range block.Transactions() {
-			download.Request(uint(index), tx.Hash())
+		if len(block.Transactions()) == 0 {
+			continue
 		}
 		for _, tx := range block.Transactions() {
-			receipt, err := download.Get(tx.Hash())
-			download.Forget(tx.Hash())
-			must(err)
-			log.Info("count====>", len(receipt.Logs))
+			download.Request(tx.Hash())
 		}
+		for _, tx := range block.Transactions() {
+			_, err := download.Get(tx.Hash())
+			must(err)
+			download.Forget(tx.Hash())
+		}
+		queuelen, pendinglen := download.Stats()
+		log.Info("Downloaded block ", blockno, " ",
+			block.Transactions().Len(),
+			" len(queue)=", queuelen,
+			" len(pending)=", pendinglen,
+		)
 	}
 	download.QueryStop()
 	download.WaitStopped()
