@@ -19,16 +19,22 @@ var (
 )
 
 const (
+	// retryDownloadTimes how much times tries to download a receipt
 	retryDownloadTimes = 5
 )
 
+// receiptTask is a single receipt download task.
 type receiptTask struct {
-	Tx      common.Hash
+	Tx     common.Hash
+	result chan error
+
+	done    bool
+	Err     error
 	Receipt *types.Receipt
-	err     chan error
 }
 
-type ReceiptDownloader struct {
+// receiptDownloader allows to download multiple receipts at the same time.
+type receiptDownloader struct {
 	sync.Mutex
 
 	client *ethclient.Client
@@ -42,9 +48,9 @@ type ReceiptDownloader struct {
 	terminatedch chan interface{}
 }
 
-func NewReceiptDownloader(client *ethclient.Client, concurrency int) *ReceiptDownloader {
+func newReceiptDownloader(client *ethclient.Client, concurrency int) *receiptDownloader {
 
-	return &ReceiptDownloader{
+	return &receiptDownloader{
 		concurrency:  concurrency,
 		client:       client,
 		queue:        []*receiptTask{},
@@ -56,23 +62,25 @@ func NewReceiptDownloader(client *ethclient.Client, concurrency int) *ReceiptDow
 
 }
 
-func (r *ReceiptDownloader) Request(txid common.Hash) {
+// Request to download a transaction.
+func (r *receiptDownloader) Request(txid common.Hash) {
 	r.Lock()
 	r.queue = append(r.queue, &receiptTask{
-		Tx:  txid,
-		err: make(chan error),
+		Tx:     txid,
+		result: make(chan error),
 	})
 	r.Unlock()
 
 	r.next()
 }
 
-func (r *ReceiptDownloader) Get(txid common.Hash) (*types.Receipt, error) {
+// Get the requested transaction, if not still downloaded, it waits.
+func (r *receiptDownloader) Get(txid common.Hash) (*types.Receipt, error) {
 
+	// Get the task from the pending list, if not, look is is still queued.
 	r.Lock()
 	task, ok := r.pending[txid]
 	if !ok {
-		// Look at the queue, this is supposed that not happens often.
 		for _, v := range r.queue {
 			if bytes.Compare(txid[:], v.Tx[:]) == 0 {
 				task = v
@@ -88,12 +96,16 @@ func (r *ReceiptDownloader) Get(txid common.Hash) (*types.Receipt, error) {
 		return nil, errTxNotFound
 	}
 
-	err := <-task.err
+	if !task.done {
+		task.Err = <-task.result
+		task.done = true
+	}
 
-	return task.Receipt, err
+	return task.Receipt, task.Err
 }
 
-func (r *ReceiptDownloader) Forget(txid common.Hash) {
+// Forget (deletes) an already downloaded transaction.
+func (r *receiptDownloader) Forget(txid common.Hash) {
 	r.Lock()
 	if _, exists := r.pending[txid]; exists {
 		delete(r.pending, txid)
@@ -103,7 +115,8 @@ func (r *ReceiptDownloader) Forget(txid common.Hash) {
 	r.Unlock()
 }
 
-func (r *ReceiptDownloader) Stats() (queuelen, pendinglen int) {
+// Stats retrieves the status.
+func (r *receiptDownloader) Stats() (queuelen, pendinglen int) {
 	r.Lock()
 	queuelen = len(r.queue)
 	pendinglen = len(r.pending)
@@ -112,8 +125,10 @@ func (r *ReceiptDownloader) Stats() (queuelen, pendinglen int) {
 	return
 }
 
-func (r *ReceiptDownloader) next() {
+// next tryies to process next item to download, if possible.
+func (r *receiptDownloader) next() {
 
+	// Get the next receipt to download, if does not reach maximum concurrency.
 	r.Lock()
 
 	if len(r.queue) == 0 || len(r.pending) >= r.concurrency {
@@ -128,6 +143,7 @@ func (r *ReceiptDownloader) next() {
 
 	r.Unlock()
 
+	// Start the download task.
 	go func() {
 
 		log.WithField("txid", task.Tx.Hex()).Debug("RDOWN Downloading receipt")
@@ -137,7 +153,10 @@ func (r *ReceiptDownloader) next() {
 
 		for retry := retryDownloadTimes; err != nil && retry > 0; retry-- {
 
-			receipt, err = r.client.TransactionReceipt(context.TODO(), task.Tx)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+
+			receipt, err = r.client.TransactionReceipt(ctx, task.Tx)
 			if err != nil {
 				log.WithFields(log.Fields{
 					"txid":  task.Tx.Hex(),
@@ -154,26 +173,28 @@ func (r *ReceiptDownloader) next() {
 		r.Unlock()
 
 		task.Receipt = receipt
-		task.err <- err
+		task.result <- err
 
 		r.nextch <- nil
 
 	}()
 
-	r.next()
 }
 
-func (r *ReceiptDownloader) QueryStop() {
+// Stop processing requests
+func (r *receiptDownloader) Stop() {
 	go func() {
 		r.terminatech <- nil
 	}()
 }
 
-func (r *ReceiptDownloader) WaitStopped() {
+// Join waits until all background jobs stopped
+func (r *receiptDownloader) Join() {
 	<-r.terminatedch
 }
 
-func (r *ReceiptDownloader) Start() {
+// Start processing requests
+func (r *receiptDownloader) Start() {
 
 	go func() {
 		for true {
@@ -187,7 +208,6 @@ func (r *ReceiptDownloader) Start() {
 				r.next()
 
 			case <-time.After(4 * time.Second):
-				log.Debug("RDOWN waiting")
 
 			}
 		}

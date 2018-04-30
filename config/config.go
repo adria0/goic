@@ -24,7 +24,7 @@ type Config struct {
 			Deploy  struct {
 				Members      []string
 				Required     uint
-				PersistLimit uint
+				PersistLimit uint64
 			}
 		}
 	}
@@ -37,7 +37,8 @@ type Config struct {
 	}
 
 	Web3 struct {
-		RPCURL string
+		RPCURL     string
+		StartBlock uint64
 	}
 }
 

@@ -38,23 +38,30 @@ var serveCmd = &cobra.Command{
 
 var deployCmd = &cobra.Command{
 	Use:   "deploy",
-	Short: "Deploy the smartcontracts",
-	Long:  "Deploy the smartcontracts in two chains",
+	Short: "Deploy the proxy smartcontract (send transaction)",
+	Long:  "Deploy the proxy smartcontract",
 	Run:   cmd.Deploy,
 }
 
 var addHashCmd = &cobra.Command{
 	Use:   "addhash",
-	Short: "Add hash",
+	Short: "Add hash (send transaction)",
 	Long:  "addhash <ipfshash> <ttl>",
 	Run:   cmd.AddHash,
 }
 
 var rmHashCmd = &cobra.Command{
 	Use:   "rmhash",
-	Short: "Remove a hash",
+	Short: "Remove a hash (send transaction)",
 	Long:  "rmhash <ipfshash>",
 	Run:   cmd.RemoveHash,
+}
+
+var setPersistLimitCmd = &cobra.Command{
+	Use:   "setpersistlimit",
+	Short: "Sets the persist limit (send transaction)",
+	Long:  "setpersistlimit <limit>",
+	Run:   cmd.SetPersistLimit,
 }
 
 var dumpDbCmd = &cobra.Command{
@@ -63,10 +70,11 @@ var dumpDbCmd = &cobra.Command{
 	Long:  "Dumps the database",
 	Run:   cmd.DumpDb,
 }
+
 var initDbCmd = &cobra.Command{
 	Use:   "initdb",
-	Short: "Dumps the database",
-	Long:  "Dumps the database",
+	Short: "Initializes the database",
+	Long:  "Initialized the database",
 	Run:   cmd.InitDb,
 }
 
@@ -75,13 +83,6 @@ var skipTxCmd = &cobra.Command{
 	Short: "Skip a transaction",
 	Long:  "Do not process the selected transaction",
 	Run:   cmd.AddSkipTx,
-}
-
-var testCmd = &cobra.Command{
-	Use:   "test",
-	Short: "test",
-	Long:  "test",
-	Run:   cmd.Test,
 }
 
 // ExecuteCmd adds all child commands to the root command sets flags appropriately.
@@ -109,7 +110,7 @@ func init() {
 	RootCmd.AddCommand(dumpDbCmd)
 	RootCmd.AddCommand(initDbCmd)
 	RootCmd.AddCommand(skipTxCmd)
-	RootCmd.AddCommand(testCmd)
+	RootCmd.AddCommand(setPersistLimitCmd)
 
 }
 

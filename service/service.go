@@ -23,9 +23,15 @@ type Service struct {
 	storage         *sto.Storage
 }
 
+var (
+	errVerifySmartcontract = errors.New("cannot verify deployed smartcontract")
+	errReadPersistLimit    = errors.New("error reading current persistLimit")
+	errReachedPersistLimit = errors.New("persistlimit reached")
+)
+
 func NewService(client *eth.Web3Client, contract *eth.Contract, ipfs *shell.Shell, storage *sto.Storage) *Service {
 	return &Service{
-		eventDispatcher: NewScanEventDispatcher(client.Client, NewSavePoint(storage)),
+		eventDispatcher: NewScanEventDispatcher(client.Client, newSavePoint(storage)),
 		client:          client,
 		contract:        contract,
 		ipfs:            ipfs,
@@ -58,9 +64,25 @@ func (s *Service) handleHashAdded(eventlog *types.Log) error {
 	}
 
 	log.WithFields(log.Fields{
-		"Hash":     event.Hash,
-		"DataSize": stats.DataSize,
+		"hash":     event.Hash,
+		"datasize": stats.DataSize,
 	}).Debug("IPFS stats")
+
+	globals, err := s.storage.Globals()
+	if err != nil {
+		return err
+	}
+
+	requieredLimit := uint64(globals.CurrentQuota) + uint64(stats.DataSize)
+	if requieredLimit > s.persistLimit.Uint64() {
+		log.WithFields(log.Fields{
+			"hash":      event.Hash,
+			"current":   s.persistLimit,
+			"requiered": requieredLimit,
+		}).Error(errReachedPersistLimit)
+
+		return errReachedPersistLimit
+	}
 
 	err = s.ipfs.Pin(event.Hash)
 	if err != nil {
@@ -146,6 +168,25 @@ func (s *Service) handleContractAdded(eventlog *types.Log) error {
 	return nil
 }
 
+func (s *Service) handlePersistLimitChanged(eventlog *types.Log) error {
+
+	var persistLimit *big.Int
+
+	err := s.contract.Abi().Unpack(&persistLimit, "PersistLimitChanged", eventlog.Data)
+	if err != nil {
+		return err
+	}
+
+	log.WithFields(log.Fields{
+		"old": s.persistLimit,
+		"new": persistLimit,
+	}).Info("SERVE PersistLimitChanged")
+
+	s.persistLimit = persistLimit
+
+	return nil
+}
+
 func (s *Service) Serve() error {
 
 	var err error
@@ -153,16 +194,17 @@ func (s *Service) Serve() error {
 	// -- read current persistlimit
 
 	if err = s.contract.VerifyBytecode(); err != nil {
-		return errors.New("cannot verify deployed smartcontract")
+		return errVerifySmartcontract
 	}
 
 	if err = s.contract.Call(&s.persistLimit, "persistLimit"); err != nil {
-		return errors.New("error reading current persistLimit")
+		return errReadPersistLimit
 	}
 
 	proxyAddress, abi := *s.contract.Address(), s.contract.Abi()
 
 	s.eventDispatcher.RegisterHandler(proxyAddress, abi, "ContractAdded", s.handleContractAdded)
+	s.eventDispatcher.RegisterHandler(proxyAddress, abi, "PersistLimitChanged", s.handlePersistLimitChanged)
 
 	var contracts []common.Address
 	if contracts, err = s.storage.Contracts(); err != nil {
@@ -188,9 +230,6 @@ func (s *Service) Serve() error {
 		s.registerContractHandlers(contract)
 	}
 
-	//eventDispatcher.MustRegister(address, abi, "ContractRemoved", handleContractRemoved)
-	//eventDispatcher.MustRegister(address, abi, "PersistLimitChanged", handlePersistLimitChanged)
-
 	s.eventDispatcher.Start()
 
 	c := make(chan os.Signal, 1)
@@ -198,11 +237,11 @@ func (s *Service) Serve() error {
 	go func() {
 		for _ = range c {
 			log.Info("SERVE interrupt signal got. Finishing.")
-			s.eventDispatcher.QueryStop()
+			s.eventDispatcher.Stop()
 			break
 		}
 	}()
-	s.eventDispatcher.WaitStopped()
+	s.eventDispatcher.Join()
 
 	return nil
 }

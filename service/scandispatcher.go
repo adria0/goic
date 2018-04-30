@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
-	ethereum "github.com/ethereum/go-ethereum"
-	abi "github.com/ethereum/go-ethereum/accounts/abi"
-	common "github.com/ethereum/go-ethereum/common"
-	types "github.com/ethereum/go-ethereum/core/types"
-	ethclient "github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -28,14 +28,15 @@ type scanEventHandler struct {
 
 type ScanEventDispatcher struct {
 	sync.Mutex
+
 	client *ethclient.Client
 
 	eventHandlers []scanEventHandler
 
-	savepoint *SavePoint
+	savepoint *savePoint
 
 	block    *types.Block
-	receipts *ReceiptDownloader
+	receipts *receiptDownloader
 
 	terminatech  chan interface{}
 	terminatedch chan interface{}
@@ -45,13 +46,13 @@ type ScanEventDispatcher struct {
 	nextLogIndex uint
 }
 
-func NewScanEventDispatcher(client *ethclient.Client, savepoint *SavePoint) *ScanEventDispatcher {
+func NewScanEventDispatcher(client *ethclient.Client, savepoint *savePoint) *ScanEventDispatcher {
 
 	return &ScanEventDispatcher{
 		client:    client,
 		savepoint: savepoint,
 
-		receipts: NewReceiptDownloader(client, 10),
+		receipts: newReceiptDownloader(client, 10),
 
 		terminatech:  make(chan interface{}),
 		terminatedch: make(chan interface{}),
@@ -107,7 +108,7 @@ func (e *ScanEventDispatcher) process() (bool, error) {
 
 	var err error
 
-	// Retrieve the last processed log, this is only called in the first loop
+	// Retrieve the last processed log, this is only called in the first loop.
 	if e.nextBlock == 0 {
 		e.nextBlock, e.nextTxIndex, e.nextLogIndex, err = e.savepoint.Load()
 		if err != nil {
@@ -117,55 +118,57 @@ func (e *ScanEventDispatcher) process() (bool, error) {
 	}
 
 	log.WithFields(log.Fields{
-		"block":    e.nextBlock,
-		"txindex":  e.nextTxIndex,
-		"logindex": e.nextLogIndex,
-	}).Debug("EVENT scanning blockchain")
+		"block/tx/log": fmt.Sprintf("%v/%v/%v", e.nextBlock, e.nextTxIndex, e.nextLogIndex),
+	}).Debug("EVENT scanning")
 
-	// Check if e.block is valid, if not download it
+	// Check if e.block is valid, if not download it.
 	if e.block == nil || e.block.NumberU64() < e.nextBlock {
 		e.block, err = e.client.BlockByNumber(context.TODO(), big.NewInt(int64(e.nextBlock)))
+
+		// Check if block is available, if is in the main chain.
 		if err == ethereum.NotFound {
-			// still not available
 			return true, nil
 		}
 		if err != nil {
 			return false, err
 		}
+
+		// Download all receipts, starting with the last processed one,
+		//   transactions marked as skip, are not processed
 		for index := e.nextTxIndex; index < uint(len(e.block.Transactions())); index++ {
-			log.Debug("Enqueueing ", e.block.Transactions()[index].Hash().Hex())
-			e.receipts.Request(e.block.Transactions()[index].Hash())
+			txid := e.block.Transactions()[index].Hash()
+			if skip, err := e.savepoint.SkipTx(txid); err == nil {
+				if !skip {
+					e.receipts.Request(e.block.Transactions()[index].Hash())
+				}
+			} else {
+				return false, err
+			}
 		}
 	}
+
+	var receipt *types.Receipt
 
 	// Download the receipt that contains the log
-	var receipt *types.Receipt
-	log.Debug("e.nextTxIndex=", e.nextTxIndex, " len(e.block.Transactions())=", len(e.block.Transactions()))
 	if e.nextTxIndex < uint(len(e.block.Transactions())) {
-
 		txid := e.block.Transactions()[e.nextTxIndex].Hash()
-		log.Debug("Reading receipt ", txid.Hex())
-
-		receipt, err := e.receipts.Get(txid)
-		if err != nil {
+		if skip, err := e.savepoint.SkipTx(txid); err == nil {
+			if !skip {
+				receipt, err = e.receipts.Get(txid)
+				if err != nil {
+					return false, err
+				}
+			}
+		} else {
 			return false, err
-		}
-
-		log.Debug("Readed receipt ", txid.Hex())
-
-		// Is marked the transaction to be skipped?
-		skip, err := e.savepoint.SkipTx(txid)
-		if err != nil {
-			return false, err
-		}
-
-		if skip {
-			e.receipts.Forget(receipt.TxHash)
 		}
 	}
 
+	// Process next log in this receipt
 	if receipt != nil && e.nextLogIndex < uint(len(receipt.Logs)) {
+
 		logevent := receipt.Logs[e.nextLogIndex]
+
 		err = e.runHandlerFor(logevent)
 		if err != nil {
 			log.WithFields(log.Fields{
@@ -198,16 +201,19 @@ func (e *ScanEventDispatcher) process() (bool, error) {
 	return false, nil
 }
 
-func (e *ScanEventDispatcher) QueryStop() {
+// Stop scanning the blockchain for events
+func (e *ScanEventDispatcher) Stop() {
 	go func() {
 		e.terminatech <- nil
 	}()
 }
 
-func (e *ScanEventDispatcher) WaitStopped() {
+// Join waits all background jobs finished
+func (e *ScanEventDispatcher) Join() {
 	<-e.terminatedch
 }
 
+// Start scanning the blockchain for events
 func (e *ScanEventDispatcher) Start() {
 
 	go func() {
@@ -218,8 +224,8 @@ func (e *ScanEventDispatcher) Start() {
 			case <-e.terminatech:
 				log.Debug("EVENT Dispatching terminatech")
 				e.terminatedch <- nil
-				e.receipts.QueryStop()
-				e.receipts.WaitStopped()
+				e.receipts.Stop()
+				e.receipts.Join()
 				return
 
 			default:

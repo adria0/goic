@@ -1,6 +1,8 @@
 package service
 
 import (
+	"fmt"
+
 	"github.com/adriamb/goic/storage"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -8,15 +10,15 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type SavePoint struct {
+type savePoint struct {
 	storage *storage.Storage
 }
 
-func NewSavePoint(storage *storage.Storage) *SavePoint {
-	return &SavePoint{storage}
+func newSavePoint(storage *storage.Storage) *savePoint {
+	return &savePoint{storage}
 }
 
-func (s *SavePoint) Load() (lastBlock uint64, lastTxIndex, lastLogIndex uint, err error) {
+func (s *savePoint) Load() (lastBlock uint64, lastTxIndex, lastLogIndex uint, err error) {
 	globals, err := s.storage.Globals()
 	if err != nil {
 		return 0, 0, 0, err
@@ -24,7 +26,7 @@ func (s *SavePoint) Load() (lastBlock uint64, lastTxIndex, lastLogIndex uint, er
 	return globals.LastBlock, globals.LastTxIndex, globals.LastLogIndex, nil
 }
 
-func (s *SavePoint) Save(logevent *types.Log) error {
+func (s *savePoint) Save(logevent *types.Log) error {
 	globals, err := s.storage.Globals()
 	if err != nil {
 		return err
@@ -35,14 +37,12 @@ func (s *SavePoint) Save(logevent *types.Log) error {
 	globals.LastLogIndex = logevent.Index
 
 	log.WithFields(log.Fields{
-		"block":  globals.LastBlock,
-		"txidx":  globals.LastTxIndex,
-		"logidx": globals.LastLogIndex,
+		"block/tx/log": fmt.Sprintf("%v/%v/%v", globals.LastBlock, globals.LastTxIndex, globals.LastLogIndex),
 	}).Debug("SAVEP save")
 
 	return s.storage.SetGlobals(*globals)
 }
 
-func (s *SavePoint) SkipTx(txid common.Hash) (bool, error) {
+func (s *savePoint) SkipTx(txid common.Hash) (bool, error) {
 	return s.storage.SkipTx(txid)
 }

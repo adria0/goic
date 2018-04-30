@@ -13,11 +13,12 @@ contracts:
             Required: 1
             PersistLimit: 1
 
-ipfs:
+IPFS:
     APIURL: http://localhost:5001
 
-web3:
+Web3:
     RPCURL: ws://localhost:8546
+    StartBlock : 1
 
-db:
-    path: /tmp/goicdb
+DB:
+    Path: /tmp/goicdb

@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -12,7 +11,6 @@ import (
 	sto "github.com/adriamb/goic/storage"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -42,6 +40,25 @@ func RemoveHash(cmd *cobra.Command, args []string) {
 		big.NewInt(0), 0,
 		"removeHash", args[0],
 	)
+	must(err)
+}
+
+func SetPersistLimit(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		must(fmt.Errorf("setpersistlimit <limit>"))
+	}
+	must(load(false))
+	limit := big.NewInt(0)
+
+	if _, ok := limit.SetString(args[0], 10); !ok {
+		must(fmt.Errorf("cannot parse limit parameter"))
+	}
+
+	_, _, err := contract.SendTransactionSync(
+		big.NewInt(0), 0,
+		"setTotalPersistLimit", limit,
+	)
+
 	must(err)
 }
 
@@ -98,12 +115,13 @@ func InitDb(cmd *cobra.Command, args []string) {
 
 	storage.SetGlobals(sto.GlobalsEntry{
 		CurrentQuota: 0,
-		LastBlock:    0,
+		LastBlock:    cfg.C.Web3.StartBlock,
 		LastLogIndex: 0,
 		LastTxIndex:  0,
 	})
 }
 
+/*
 func Test(cmd *cobra.Command, args []string) {
 
 	client, err := ethclient.Dial("http://localhost:8545")
@@ -137,6 +155,7 @@ func Test(cmd *cobra.Command, args []string) {
 	download.WaitStopped()
 
 }
+*/
 
 func Serve(cmd *cobra.Command, args []string) {
 
